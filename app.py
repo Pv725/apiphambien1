@@ -1,48 +1,53 @@
 # ============================================================
-# File: app.py - GEMINI AI ĐÃ TÍCH HỢP API KEY CỦA BẠN
+# File: app.py - GEMINI AI ĐÃ ĐƯỢC LẮP MẮT THẦN (VISION)
 # ============================================================
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import re
 import google.generativeai as genai
+import requests
+from PIL import Image
+from io import BytesIO
 
 app = Flask(__name__)
 CORS(app)
 
-# API Key của bạn (đã nhập trực tiếp)
-GEMINI_API_KEY = "AIzaSyCq5AfWX-LA_bzeSU2ykP8cHysj9pXvZWc"
+# NHỚ THAY LẠI API KEY MỚI CỦA BẠN VÀO ĐÂY NHÉ (Key cũ tôi khuyên bạn nên xóa đi để bảo mật)
+GEMINI_API_KEY = "AIzaSy_NHẬP_KEY_CỦA_BẠN_VÀO_ĐÂY"
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Model Gemini
 MODEL_NAME = 'gemini-1.5-flash'
 model = genai.GenerativeModel(MODEL_NAME)
 
-# Prompt hệ thống
 SYSTEM_PROMPT = """
-Bạn là trợ lý tra cứu đáp án câu hỏi lý thuyết lái xe.
-Nhiệm vụ: Đọc câu hỏi và chỉ trả về chính xác nội dung đáp án đúng, không giải thích gì thêm.
-Trả lời ngắn gọn, đúng đáp án, không thêm từ "Đáp án:", không xuống dòng.
-Ví dụ câu hỏi: "Biển nào báo hiệu Đường đôi?" -> trả lời: "Biển 3".
-Nếu không tìm thấy đáp án, trả về: "Không xác định".
+Bạn là chuyên gia thi lý thuyết lái xe hạng B1/B2/C tại Việt Nam.
+Nhiệm vụ: Đọc câu hỏi (và xem hình ảnh nếu có) để tìm ra đáp án đúng nhất.
+Chỉ trả về phần chữ của đáp án đúng, tuyệt đối không giải thích, không thêm chữ "Đáp án:".
+Ví dụ: "Biển 3", "Cả hai biển", "Đi thẳng hoặc rẽ trái".
 """
 
-def get_answer_from_gemini(question_text):
+def get_answer_from_gemini(question_text, image_url=None):
     try:
-        full_prompt = f"{SYSTEM_PROMPT}\n\nCâu hỏi: {question_text}\nTrả lời:"
+        # Nhét chữ vào trước
+        contents = [f"{SYSTEM_PROMPT}\n\nCâu hỏi: {question_text}\nTrả lời:"]
+        
+        # Nếu có link ảnh, tải ảnh về và nhét thêm vào cho Gemini nhìn
+        if image_url:
+            print(f"[*] Đang tải ảnh từ web: {image_url}")
+            img_response = requests.get(image_url, timeout=5)
+            if img_response.status_code == 200:
+                img = Image.open(BytesIO(img_response.content))
+                contents.append(img)
+                print("[+] Đã tải ảnh và ghép vào Prompt thành công!")
+
         response = model.generate_content(
-            full_prompt,
+            contents,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.0,
                 max_output_tokens=60,
-                candidate_count=1,
-            ),
-            safety_settings={
-                'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
-                'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
-                'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
-                'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE',
-            }
+            )
         )
+        
         answer = response.text.strip()
         answer = re.sub(r'^(Đáp án:|đáp án:|Answer:|answer:)\s*', '', answer)
         return answer
@@ -50,23 +55,24 @@ def get_answer_from_gemini(question_text):
         print(f"Lỗi Gemini API: {e}")
         return None
 
-# Endpoint
 @app.route('/api/tra-cuu', methods=['POST'])
 def tra_cuu():
     data = request.get_json()
     if not data or 'question' not in data:
-        return jsonify({"error": "Thiếu trường 'question'"}), 400
+        return jsonify({"error": "Thiếu dữ liệu"}), 400
     
     question = data['question']
-    answer = get_answer_from_gemini(question)
+    image_url = data.get('image_url') # Nhận thêm link ảnh từ Tampermonkey
+    
+    print(f"\n[+] Đang hỏi Gemini: {question}")
+    answer = get_answer_from_gemini(question, image_url)
+    
     if answer and answer != "Không xác định":
+        print(f"=> Gemini chốt đáp án: {answer}")
         return jsonify({"answer": answer})
     
     return jsonify({"answer": "Không tìm thấy đáp án"}), 404
 
-@app.route('/')
-def home():
-    return "API Bot Hoàng Gia - Gemini AI đang chạy"
-
 if __name__ == '__main__':
+    print("🚀 Máy chủ Gemini (Có Vision) đang chạy tại Port 10000")
     app.run(host='0.0.0.0', port=10000)
